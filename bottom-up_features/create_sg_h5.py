@@ -11,6 +11,7 @@ except ModuleNotFoundError:
 Please run this script with the environment variable PYTHONPATH including the path to `graph-rcnn.pytorch`.
 Example:
 PYTHONPATH="/path/to/graph-rcnn.pytorch" python create_sg_h5.py.""")
+    #export PYTHONPATH="/home/jeff/Projects/graph-rcnn.pytorch/"
     sys.exit(1)
 import h5py
 import pickle
@@ -220,10 +221,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser('Image Captioning')
     # Add config file arguments
     parser.add_argument('--buffersize', default=1, type=int, help='how many images to store at a time')
-    parser.add_argument('--sgg-cfg-file', default="configs/sgg/sgg.IMP_pretrained.yaml", type=str,
+    parser.add_argument('--sgg-cfg-file', default="configs/config.yaml", type=str,
                         help='config for scene graph generator')
-    parser.add_argument('--sgg-weight-file', default="weights/sg_imp_step_ckpt.pth", type=str,
+    parser.add_argument('--sgg-weight-file', default="weights/sg_imp_relpn_step_ckpt.pth", type=str,
                         help='weights for scene graph generator')
+
     # Parse the arguments
     args = parser.parse_args()
     sgg_cfg_file = args.sgg_cfg_file
@@ -232,11 +234,13 @@ if __name__ == '__main__':
     val_data_file = 'val_scene-graph.hdf5'
     train_indices_file = 'train_scene-graph_imgid2idx.pkl'
     val_indices_file = 'val_scene-graph_imgid2idx.pkl'
-    train_ids_file = 'train_scene-graph_ids.pkl'
-    val_ids_file = 'val_scene-graph_ids.pkl'
+    # train_ids_file = 'train_scene-graph_ids.pkl'
+    # val_ids_file = 'val_scene-graph_ids.pkl'
     train_imgs_path = 'data/train2014/'
-    val_imgs_path = 'data/val2014/'
+    # val_imgs_path = 'data/val2014/'
+    val_imgs_path = 'data/valtest2014/'
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
+    # device = torch.device("cpu")
 
-    construct_sgg_hdf5(train_data_file, train_indices_file, train_imgs_path, buffer_size=args.buffersize)
+    # construct_sgg_hdf5(train_data_file, train_indices_file, train_imgs_path, buffer_size=args.buffersize)
     construct_sgg_hdf5(val_data_file, val_indices_file, val_imgs_path, buffer_size=args.buffersize)
