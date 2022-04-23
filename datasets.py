@@ -11,7 +11,7 @@ class CaptionDataset(Dataset):
     A PyTorch Dataset class to be used in a PyTorch DataLoader to create batches.
     """
 
-    def __init__(self, data_folder, data_name, split, transform=None, scene_graph=False):
+    def __init__(self, data_folder, data_name, split, transform=None):
         """
         :param data_folder: folder where data files are stored
         :param data_name: base name of processed datasets
@@ -19,7 +19,6 @@ class CaptionDataset(Dataset):
         :param transform: image transform pipeline
         """
         self.split = split
-        self.scene_graph = scene_graph
         dataset_name = data_name.split('_')[0]
         assert self.split in {'TRAIN', 'VAL', 'TEST'}
 

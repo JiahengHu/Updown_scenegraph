@@ -184,7 +184,8 @@ def create_scene_graph_input_files(dataset, karpathy_json_path, output_folder):
     train_image_det = []
     val_image_det = []
     test_image_det = []
-    word_freq = Counter()
+
+    # This loops through the image dataset
     for img in data['images']:
         image_id = img['filename'].split('_')[2]
         image_id = int(image_id.lstrip("0").split('.')[0])

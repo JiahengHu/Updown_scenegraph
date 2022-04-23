@@ -1,5 +1,5 @@
-torch==1.4
-torchvision==0.5
+torch==1.5
+torchvision==0.6.0
 h5py
 tqdm
 nltk

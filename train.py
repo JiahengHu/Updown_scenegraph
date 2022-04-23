@@ -17,7 +17,6 @@ from pycocoevalcap.eval import COCOEvalCap
 from eval import beam_evaluate
 
 word_map = word_map_inv = None
-scene_graph = False
 
 
 def main():
@@ -25,7 +24,7 @@ def main():
     Training and validation.
     """
 
-    global word_map, word_map_inv, scene_graph
+    global word_map, word_map_inv
 
     # Read word map
     word_map_file = os.path.join(args.data_folder, 'WORDMAP_' + args.data_name + '.json')
@@ -75,13 +74,12 @@ def main():
     train_loader = torch.utils.data.DataLoader(CaptionDataset(args.data_folder, args.data_name, 'TRAIN'),
                                                batch_size=args.batch_size, shuffle=True,
                                                num_workers=args.workers, pin_memory=True)
-    val_loader = torch.utils.data.DataLoader(CaptionDataset(args.data_folder, args.data_name, 'VAL',
-                                                            scene_graph=scene_graph),
+    val_loader = torch.utils.data.DataLoader(CaptionDataset(args.data_folder, args.data_name, 'VAL'),
                                              collate_fn=collate_fn,
                                              # use our specially designed collate function with valid/test only
                                              batch_size=1, shuffle=False,
                                              num_workers=args.workers, pin_memory=True)
-    #    batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
+    # batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
 
     # Epochs
     for epoch in range(start_epoch, args.epochs):
