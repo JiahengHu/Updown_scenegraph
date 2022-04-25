@@ -66,6 +66,10 @@ class TrainingDataset(Dataset):
         item = [image_features, obj, rel, obj_mask, rel_mask, pair_idx, caption_tokens, caplen]
         return item
 
+    def __len__(self) -> int:
+        # Number of training examples are number of captions, not number of images.
+        return len(self._captions_reader)
+
 # class ValidationDataset(Dataset):
 #     """
 #     A PyTorch Dataset class to be used in a PyTorch DataLoader to create batches.
