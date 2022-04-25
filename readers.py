@@ -15,8 +15,6 @@ from nltk.tokenize import word_tokenize
 import numpy as np
 from tqdm import tqdm
 
-from updown.types import ConstraintBoxes
-
 
 class ImageFeaturesReader(object):
     r"""
@@ -133,56 +131,3 @@ class CocoCaptionsReader(object):
     def __getitem__(self, index) -> Tuple[int, List[str]]:
         return self._captions[index]
 
-
-class ConstraintBoxesReader(object):
-    r"""
-    A reader for annotation files containing detected bounding boxes (in COCO format). The JSON
-    file should have ``categories``, ``images`` and ``annotations`` fields (similar to COCO
-    instance annotations).
-
-    Extended Summary
-    ----------------
-    For our use cases, the detections are from an object detector trained using Open Images.
-    These can be produced for any set of images by following instructions
-    `here <https://github.com/nocaps-org/image-feature-extractors#extract-boxes-from-oi-detector>`_.
-
-    Parameters
-    ----------
-    boxes_jsonpath: str
-        Path to a JSON file containing bounding box detections in COCO format (nocaps val/test
-        usually).
-    """
-
-    def __init__(self, boxes_jsonpath: str):
-
-        _boxes = json.load(open(boxes_jsonpath))
-
-        # Form a mapping between Image ID and corresponding boxes from OI Detector.
-        self._image_id_to_boxes: Dict[int, Any] = {}
-
-        for ann in _boxes["annotations"]:
-            if ann["image_id"] not in self._image_id_to_boxes:
-                self._image_id_to_boxes[ann["image_id"]] = []
-
-            self._image_id_to_boxes[ann["image_id"]].append(ann)
-
-        # A list of Open Image object classes. Index of a class in this list is its Open Images
-        # class ID. Open Images class IDs start from 1, so zero-th element is "__background__".
-        self._class_names = [c["name"] for c in _boxes["categories"]]
-
-    def __len__(self) -> int:
-        return len(self._image_id_to_boxes)
-
-    def __getitem__(self, image_id: int) -> ConstraintBoxes:
-
-        # List of bounding box detections from OI detector in COCO format.
-        # Some images may not have any boxes, handle that case too.
-        bbox_anns = self._image_id_to_boxes.get(int(image_id), [])
-
-        boxes = np.array([ann["bbox"] for ann in bbox_anns])
-        scores = np.array([ann.get("score", 1) for ann in bbox_anns])
-
-        # Convert object class IDs to their names.
-        class_names = [self._class_names[ann["category_id"]] for ann in bbox_anns]
-
-        return {"boxes": boxes, "class_names": class_names, "scores": scores}

@@ -4,7 +4,7 @@ import h5py
 import pickle
 import json
 import os
-from readers import CocoCaptionsReader, ConstraintBoxesReader, ImageFeaturesReader
+from readers import CocoCaptionsReader, ImageFeaturesReader
 from typing import Dict, List
 import numpy as np
 
