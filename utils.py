@@ -341,9 +341,9 @@ def create_batched_graphs(o, om, r, rm, pairs, beam_size=1):
     # o = o.detach().cpu().numpy()
     for b in range(bsz):
         for k in range(beam_size):
-            graph = dgl.DGLGraph().to("cuda")
+            graph = dgl.DGLGraph()#.to("cuda")
             graph.add_nodes(num=om[b].sum())
-            graph.ndata['F_n'] = o[b, om[b]]
+            graph.ndata['F_n'] = o[b, om[b]].detach().cpu().numpy()
             cpu_mask = rm[b].detach().cpu()
             graph.add_edges(pairs[b][cpu_mask, 0], pairs[b][cpu_mask, 1])
             graph.edata['F_e'] = r[b, rm[b]]
