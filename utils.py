@@ -338,10 +338,10 @@ def create_batched_graphs(o, om, r, rm, pairs, beam_size=1):
     pairs = pairs.detach().cpu().numpy()
     # do this on cpu??? or gpu???
     # test
-    o = o.detach().cpu().numpy()
+    # o = o.detach().cpu().numpy()
     for b in range(bsz):
         for k in range(beam_size):
-            graph = dgl.DGLGraph()
+            graph = dgl.DGLGraph().to("cuda")
             graph.add_nodes(num=om[b].sum())
             graph.ndata['F_n'] = o[b, om[b]]
             cpu_mask = rm[b].detach().cpu()
