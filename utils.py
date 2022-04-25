@@ -336,6 +336,9 @@ def create_batched_graphs(o, om, r, rm, pairs, beam_size=1):
     bsz = o.size(0)
     graphs = []
     pairs = pairs.detach().cpu().numpy()
+    # do this on cpu??? or gpu???
+    # test
+    o = o.detach().cpu().numpy()
     for b in range(bsz):
         for k in range(beam_size):
             graph = dgl.DGLGraph()
