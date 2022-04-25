@@ -60,8 +60,13 @@ def main():
     criterion_ce = nn.CrossEntropyLoss().to(device)
     criterion_dis = nn.MultiLabelMarginLoss().to(device)
 
-    image_features_h5path = "data/coco_train2017_vg_detector_features_adaptive.h5"
-    captions_jsonpath = "data/coco/captions_train2017.json"
+    # image_features_h5path = "data/coco_train2017_vg_detector_features_adaptive.h5"
+    # captions_jsonpath = "data/coco/captions_train2017.json"
+
+    # for now we are training with the validation dataset (since it is smaller)
+    image_features_h5path = "data/coco_val2017_vg_detector_features_adaptive.h5"
+    captions_jsonpath = "data/coco/captions_val2017.json"
+
     # Custom dataloaders
     train_loader = torch.utils.data.DataLoader(TrainingDataset(args.data_folder, vocabulary,
                                                                captions_jsonpath, image_features_h5path),
@@ -205,7 +210,7 @@ if __name__ == '__main__':
     metrics = ["CIDEr", "SPICE", "loss", "top5"]
     parser = argparse.ArgumentParser('Nocap')
     # Add config file arguments
-    parser.add_argument('--data_folder', default='final_dataset', type=str,
+    parser.add_argument('--data_folder', default='data', type=str,
                         help='folder with data files saved by create_input_files.py')
     parser.add_argument('--data_name', default='coco_5_cap_per_img_5_min_word_freq', type=str,
                         help='base name shared by data files')
