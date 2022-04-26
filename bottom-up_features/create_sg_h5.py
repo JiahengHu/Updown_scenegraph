@@ -233,8 +233,8 @@ if __name__ == '__main__':
     val_data_file = 'val_scene-graph.hdf5'
     train_indices_file = 'train_scene-graph_imgid2idx.pkl'
     val_indices_file = 'val_scene-graph_imgid2idx.pkl'
-    train_imgs_path = '~/jeff/dataset/train2017/'
-    val_imgs_path = '~/jeff/dataset/val2017/'
+    train_imgs_path = '/home/ubuntu/jeff/dataset/train2017/'
+    val_imgs_path = '/home/ubuntu/jeff/dataset/val2017/'
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
 
     construct_sgg_hdf5(train_data_file, train_indices_file, train_imgs_path, buffer_size=args.buffersize)
