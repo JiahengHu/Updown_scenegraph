@@ -1,5 +1,5 @@
 from allennlp.data import Vocabulary
-from new_datasets import TrainingDataset
+from datasets import TrainingDataset
 import argparse
 import shutil
 import time
@@ -12,7 +12,6 @@ import pickle
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
 from models import Decoder
-from datasets import CaptionDataset
 from utils import collate_fn, save_checkpoint, AverageMeter, adjust_learning_rate, accuracy, create_captions_file
 
 
@@ -206,6 +205,152 @@ def train(train_loader, decoder, criterion_ce, criterion_dis, decoder_optimizer,
                                                                           data_time=data_time, loss=losses,
                                                                           top5=top5accs))
 
+def validate(val_loader, decoder, criterion_ce, criterion_dis, epoch):
+    """
+    Performs one epoch's validation.
+    :param val_loader: DataLoader for validation data.
+    :param decoder: decoder model
+    :param criterion_ce: cross entropy loss layer
+    :param criterion_dis : discriminative loss layer
+    :param epoch: for which epoch is validated
+    :return: BLEU-4 score
+    """
+    decoder.eval()  # eval mode (no dropout or batchnorm)
+
+    batch_time = AverageMeter()
+    losses = AverageMeter()
+    top5accs = AverageMeter()
+
+    start = time.time()
+
+    references = list()  # references (true captions) for calculating BLEU-4 score
+    hypotheses = list()  # hypotheses (predictions)
+
+    # Batches
+    with torch.no_grad():
+        # for i, (imgs, caps, caplens,allcaps) in enumerate(val_loader):
+        for i, sample in enumerate(val_loader):
+            if i % 5 != 0:
+                # only decode every 5th caption, starting from idx 0.
+                # this is because the iterator iterates over all captions in the dataset, not all images.
+                if i % args.print_freq_val == 0:
+                    print('Validation: [{0}/{1}]\t'
+                          'Batch Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                          'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                          'Top-5 Accuracy {top5.val:.3f} ({top5.avg:.3f})\t'.format(i, len(val_loader),
+                                                                                    batch_time=batch_time,
+                                                                                    loss=losses, top5=top5accs))
+                continue
+
+            (imgs, obj, rel, obj_mask, rel_mask, pair_idx, caps, caplens, orig_caps) = sample
+            # Move to GPU, if available
+            imgs = imgs.to(device)
+            obj = obj.to(device)
+            obj_mask = obj_mask.to(device)
+            rel = rel.to(device)
+            rel_mask = rel_mask.to(device)
+            caps = caps.to(device)
+            caplens = caplens.to(device)
+
+            # Forward prop.
+            scores, scores_d, caps_sorted, decode_lengths, sort_ind = decoder(imgs, obj, rel, obj_mask, rel_mask,
+                                                                              pair_idx, caps, caplens)
+
+            # Max-pooling across predicted words across time steps for discriminative supervision
+            scores_d = scores_d.max(1)[0]
+
+            # Since we decoded starting with <start>, the targets are all words after <start>, up to <end>
+            targets = caps_sorted[:, 1:]
+            targets_d = torch.zeros(scores_d.size(0), scores_d.size(1)).to(device)
+            targets_d.fill_(-1)
+
+            for length in decode_lengths:
+                targets_d[:, :length - 1] = targets[:, :length - 1]
+
+            # Remove timesteps that we didn't decode at, or are pads
+            # pack_padded_sequence is an easy trick to do this
+            scores_copy = scores.clone()
+            scores = pack_padded_sequence(scores, decode_lengths, batch_first=True, enforce_sorted=True).data
+            targets = pack_padded_sequence(targets, decode_lengths, batch_first=True, enforce_sorted=True).data
+
+            # Calculate loss
+            loss_d = criterion_dis(scores_d, targets_d.long())
+            loss_g = criterion_ce(scores, targets)
+            loss = loss_g + (10 * loss_d)
+
+            # Keep track of metrics
+            losses.update(loss.item(), sum(decode_lengths))
+            top5 = accuracy(scores, targets, 5)
+            top5accs.update(top5, sum(decode_lengths))
+            batch_time.update(time.time() - start)
+
+            start = time.time()
+
+            if i % args.print_freq_val == 0:
+                print('Validation: [{0}/{1}]\t'
+                      'Batch Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                      'Top-5 Accuracy {top5.val:.3f} ({top5.avg:.3f})\t'.format(i, len(val_loader),
+                                                                                batch_time=batch_time,
+                                                                                loss=losses, top5=top5accs))
+
+            # Store references (true captions), and hypothesis (prediction) for each image
+            # If for n images, we have n hypotheses, and references a, b, c... for each image, we need -
+            # references = [[ref1a, ref1b, ref1c], [ref2a, ref2b], ...], hypotheses = [hyp1, hyp2, ...]
+
+            # References
+            assert (len(sort_ind) == 1), "Cannot have batch_size>1 for validation."
+            # a reference is a list of lists:
+            # [['the', 'cat', 'sat', 'on', 'the', 'mat'], ['a', 'cat', 'on', 'the', 'mat']]
+            references.append(orig_caps)
+
+            # Hypotheses
+            _, preds = torch.max(scores_copy, dim=2)
+            preds = preds.tolist()
+            preds_idxs_no_pads = list()
+            for j, p in enumerate(preds):
+                preds_idxs_no_pads.append(preds[j][:decode_lengths[j]])  # remove pads
+                preds_idxs_no_pads = list(map(lambda c: [w for w in c if w not in {word_map['<start>'],
+                                                                                   word_map['<pad>']}],
+                                              preds_idxs_no_pads))
+            temp_preds = list()
+            # remove <start> and pads and convert idxs to string
+            for hyp in preds_idxs_no_pads:
+                temp_preds.append([])
+                for w in hyp:
+                    assert (not w == word_map['pad']), "Should have removed all pads."
+                    if not w == word_map['<start>']:
+                        temp_preds[-1].append(word_map_inv[w])
+            preds = temp_preds
+            hypotheses.extend(preds)
+            assert len(references) == len(hypotheses)
+
+    # Calculate BLEU-4 scores
+    # compute the metrics
+    hypotheses_file = os.path.join(args.outdir, 'hypotheses', 'Epoch{:0>3d}.Hypotheses.json'.format(epoch))
+    references_file = os.path.join(args.outdir, 'references', 'Epoch{:0>3d}.References.json'.format(epoch))
+    create_captions_file(range(len(hypotheses)), hypotheses, hypotheses_file)
+    create_captions_file(range(len(references)), references, references_file)
+    coco = COCO(references_file)
+    # add the predicted results to the object
+    coco_results = coco.loadRes(hypotheses_file)
+    # create the evaluation object with both the ground-truth and the predictions
+    coco_eval = COCOEvalCap(coco, coco_results)
+    # change to use the image ids in the results object, not those from the ground-truth
+    coco_eval.params['image_id'] = coco_results.getImgIds()
+    # run the evaluation
+    coco_eval.evaluate(verbose=False, metrics=['bleu', 'meteor', 'rouge', 'cider'])
+    # Results contains: "Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4", "METEOR", "ROUGE_L", "CIDEr", "SPICE"
+    results = coco_eval.eval
+    results['loss'] = losses.avg
+    results['top5'] = top5accs.avg
+
+    for k, v in results.items():
+        print(k+':\t'+str(v))
+    # print('\n * LOSS - {loss.avg:.3f}, TOP-5 ACCURACY - {top5.avg:.3f}, BLEU-4 - {bleu}, CIDEr - {cider}\n'
+    #       .format(loss=losses, top5=top5accs, bleu=round(results['Bleu_4'], 4), cider=round(results['CIDEr'], 1)))
+    return results
+
 if __name__ == '__main__':
     metrics = ["CIDEr", "SPICE", "loss", "top5"]
     parser = argparse.ArgumentParser('Nocap')
@@ -219,9 +364,7 @@ if __name__ == '__main__':
     parser.add_argument('--checkpoint', default=None, type=str, help='path to checkpoint, None if none')
     parser.add_argument('--outdir', default='outputs', type=str,
                         help='path to location where to save outputs. Empty for current working dir')
-    parser.add_argument('--workers', default=1, type=int,
-                        help='for data-loading; right now, only 1 works with h5py '
-                             '(OUTDATED, h5py can have multiple reads, right)')
+    parser.add_argument('--workers', default=1, type=int)
     parser.add_argument('--batch_size', default=100, type=int, help='batch size')
     parser.add_argument('--seed', default=42, type=int, help='The random seed that will be used.')
     parser.add_argument('--emb_dim', default=1024, type=int, help='dimension of word embeddings')
@@ -240,8 +383,6 @@ if __name__ == '__main__':
                         help='stop training when metric doesnt improve for this many epochs')
     parser.add_argument('--stopping_metric', default='Bleu_4', type=str, choices=metrics,
                         help='which metric to use for early stopping')
-    parser.add_argument('--test_at_end', default=True, type=bool, help='If there should be tested on the test split')
-    parser.add_argument('--beam_size', default=5, type=int, help='If test at end, beam size to use for testing.')
 
     # Parse the arguments
     args = parser.parse_args()

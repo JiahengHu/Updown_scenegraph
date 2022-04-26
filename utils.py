@@ -250,7 +250,9 @@ def save_checkpoint(data_name, epoch, epochs_since_improvement, decoder, decoder
              'tracking': tracking,
              'best_epoch': best_epoch}
     filename = 'checkpoint_' + data_name + '.pth.tar'
-    torch.save(state, os.path.join(outdir, filename))
+    # torch.save(state, os.path.join(outdir, filename))
+    # due to space constraint, we only save the best model
+
     # If this checkpoint is the best so far, store a copy so it doesn't get overwritten by a worse checkpoint
     if is_best:
         torch.save(state, os.path.join(outdir, 'BEST_' + str(epoch) + '_' + filename))
