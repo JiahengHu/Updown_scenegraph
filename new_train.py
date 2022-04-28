@@ -294,8 +294,8 @@ def validate(val_loader, decoder, criterion_ce, criterion_dis, epoch):
                                                                                 batch_time=batch_time,
                                                                                 loss=losses, top5=top5accs))
 
-
-                instance_predictions = scores_d[0, :]
+                _, preds = torch.max(scores_copy, dim=2)
+                instance_predictions = preds.tolist()
 
                 # De-tokenize caption tokens and trim until first "@@BOUNDARY@@".
                 caption = [
