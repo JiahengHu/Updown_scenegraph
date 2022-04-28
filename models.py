@@ -246,7 +246,7 @@ class Decoder(nn.Module):
 
         # TODO: this should be the place we make corresponding adjustments
         # Add "@@BOUNDARY@@" tokens to caption sequences.
-        caption_tokens, _ = add_sentence_boundary_token_ids(
+        encoded_captions, _ = add_sentence_boundary_token_ids(
             encoded_captions,
             (encoded_captions != self._pad_index),
             self._boundary_index,
