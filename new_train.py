@@ -397,7 +397,7 @@ if __name__ == '__main__':
                         help='stop training when metric doesnt improve for this many epochs')
     parser.add_argument('--stopping_metric', default='Bleu_4', type=str, choices=metrics,
                         help='which metric to use for early stopping')
-    parser.add_argument('--test_eval', default=False, action="store_true",)
+    parser.add_argument('--test_val', default=False, action="store_true",)
 
     # Parse the arguments
     args = parser.parse_args()
