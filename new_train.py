@@ -299,7 +299,7 @@ def validate(val_loader, decoder, criterion_ce, criterion_dis, epoch):
 
                 # De-tokenize caption tokens and trim until first "@@BOUNDARY@@".
                 caption = [
-                    vocabulary.get_token_from_index(p.item()) for p in instance_predictions
+                    vocabulary.get_token_from_index(p) for p in instance_predictions
                 ]
                 eos_occurences = [
                     j for j in range(len(caption)) if caption[j] == "@@BOUNDARY@@"
