@@ -242,7 +242,7 @@ def validate(val_loader, decoder, criterion_ce, criterion_dis, epoch):
                                                                                     loss=losses, top5=top5accs))
                 continue
 
-            (imgs, obj, rel, obj_mask, rel_mask, pair_idx, caps, caplens, orig_caps) = sample
+            (imgs, obj, rel, obj_mask, rel_mask, pair_idx, caps, caplens) = sample
             # Move to GPU, if available
             imgs = imgs.to(device)
             obj = obj.to(device)
@@ -421,19 +421,19 @@ if __name__ == '__main__':
     #                                u=args.cgat_update_rel),
     #                            'seed-{}'.format(args.seed))
     if os.path.exists(args.outdir) and args.checkpoint is None:
-        answer = input("\n\t!! WARNING !! \nthe specified --outdir already exists, "
-                       "probably from previous experiments: \n\t{}\n"
-                       "Ist it okay to delete it and all its content for current experiment? "
-                       "(Yes/No) .. ".format(args.outdir))
-        if answer.lower() == "yes":
-            print('SAVE_DIR will be deleted ...')
-            shutil.rmtree(args.outdir)
-            os.makedirs(os.path.join(args.outdir, 'hypotheses'), exist_ok=True)
-            os.makedirs(os.path.join(args.outdir, 'references'), exist_ok=True)
-        else:
-            print('To run this experiment and preserve the other one, change some settings, like the --seed.\n'
-                  '\tExiting Program...')
-            exit(0)
+        # answer = input("\n\t!! WARNING !! \nthe specified --outdir already exists, "
+        #                "probably from previous experiments: \n\t{}\n"
+        #                "Ist it okay to delete it and all its content for current experiment? "
+        #                "(Yes/No) .. ".format(args.outdir))
+        # if answer.lower() == "yes":
+        print('SAVE_DIR will be deleted ...')
+        shutil.rmtree(args.outdir)
+        os.makedirs(os.path.join(args.outdir, 'hypotheses'), exist_ok=True)
+        os.makedirs(os.path.join(args.outdir, 'references'), exist_ok=True)
+        # else:
+        #     print('To run this experiment and preserve the other one, change some settings, like the --seed.\n'
+        #           '\tExiting Program...')
+        #     exit(0)
     elif os.path.exists(args.outdir) and args.checkpoint is not None:
         print('continueing from checkpoint {} in {}...'.format(args.checkpoint, args.outdir))
     elif not os.path.exists(args.outdir) and args.checkpoint is not None:
