@@ -152,7 +152,7 @@ class Decoder(nn.Module):
 
     def __init__(self, attention_dim, embed_dim, decoder_dim, vocab_size, features_dim=2048,
                  graph_features_dim=512, dropout=0.5, cgat_obj_info=True, cgat_rel_info=True,
-                 cgat_k_steps=1, cgat_update_rel=True):
+                 cgat_k_steps=1, cgat_update_rel=True, vocabulary=None):
         """
         :param attention_dim: size of attention network
         :param embed_dim: embedding size
@@ -169,6 +169,10 @@ class Decoder(nn.Module):
         self.decoder_dim = decoder_dim
         self.vocab_size = vocab_size
         self.dropout = dropout
+        self.vocabulary = vocabulary
+
+        self._pad_index = vocabulary.get_token_index("@@UNKNOWN@@")
+        self._boundary_index = vocabulary.get_token_index("@@BOUNDARY@@")
 
         # cascade attention network
         self.context_gat = ContextGAT(context_dim=decoder_dim, feature_dim=graph_features_dim,
@@ -240,6 +244,21 @@ class Decoder(nn.Module):
         # initialize the graphs
         g = create_batched_graphs(object_features, object_mask, relation_features, relation_mask, pair_ids)
 
+        # TODO: this should be the place we make corresponding adjustments
+        # Add "@@BOUNDARY@@" tokens to caption sequences.
+        caption_tokens, _ = add_sentence_boundary_token_ids(
+            encoded_captions,
+            (encoded_captions != self._pad_index),
+            self._boundary_index,
+            self._boundary_index,
+        )
+
+
+        # # what is this used for?
+        # # shape: (batch_size, max_caption_length)
+        # batch_size, max_caption_length = caption_tokens.size()
+        # tokens_mask = caption_tokens != self._pad_index
+
         # Embedding
         embeddings = self.embedding(encoded_captions)  # (batch_size, max_caption_length, embed_dim)
 
@@ -249,7 +268,8 @@ class Decoder(nn.Module):
         
         # We won't decode at the <end> position, since we've finished generating as soon as we generate <end>
         # So, decoding lengths are actual lengths - 1
-        decode_lengths = (caption_lengths - 1).tolist()
+        # instead, add the start boundary token
+        decode_lengths = (caption_lengths + 1).tolist()
 
         # Create tensors to hold word predicion scores
         predictions = torch.zeros(batch_size, max(decode_lengths), vocab_size).to(device)
@@ -295,3 +315,58 @@ class Decoder(nn.Module):
 
         return predictions, predictions1, encoded_captions, decode_lengths, sort_ind
 
+def add_sentence_boundary_token_ids(tensor: torch.Tensor,
+                                    mask: torch.Tensor,
+                                    sentence_begin_token,
+                                    sentence_end_token):
+    """
+    Add begin/end of sentence tokens to the batch of sentences.
+    Given a batch of sentences with size ``(batch_size, timesteps)`` or
+    ``(batch_size, timesteps, dim)`` this returns a tensor of shape
+    ``(batch_size, timesteps + 2)`` or ``(batch_size, timesteps + 2, dim)`` respectively.
+
+    Returns both the new tensor and updated mask.
+
+    Parameters
+    ----------
+    tensor : ``torch.Tensor``
+        A tensor of shape ``(batch_size, timesteps)`` or ``(batch_size, timesteps, dim)``
+    mask : ``torch.Tensor``
+         A tensor of shape ``(batch_size, timesteps)``
+    sentence_begin_token: Any (anything that can be broadcast in torch for assignment)
+        For 2D input, a scalar with the <S> id. For 3D input, a tensor with length dim.
+    sentence_end_token: Any (anything that can be broadcast in torch for assignment)
+        For 2D input, a scalar with the </S> id. For 3D input, a tensor with length dim.
+
+    Returns
+    -------
+    tensor_with_boundary_tokens : ``torch.Tensor``
+        The tensor with the appended and prepended boundary tokens. If the input was 2D,
+        it has shape (batch_size, timesteps + 2) and if the input was 3D, it has shape
+        (batch_size, timesteps + 2, dim).
+    new_mask : ``torch.Tensor``
+        The new mask for the tensor, taking into account the appended tokens
+        marking the beginning and end of the sentence.
+    """
+    # TODO: matthewp, profile this transfer
+    sequence_lengths = mask.sum(dim=1).detach().cpu().numpy()
+    tensor_shape = list(tensor.data.shape)
+    new_shape = list(tensor_shape)
+    new_shape[1] = tensor_shape[1] + 2
+    tensor_with_boundary_tokens = tensor.new_zeros(*new_shape)
+    if len(tensor_shape) == 2:
+        tensor_with_boundary_tokens[:, 1:-1] = tensor
+        tensor_with_boundary_tokens[:, 0] = sentence_begin_token
+        for i, j in enumerate(sequence_lengths):
+            tensor_with_boundary_tokens[i, j + 1] = sentence_end_token
+        new_mask = (tensor_with_boundary_tokens != 0).long()
+    elif len(tensor_shape) == 3:
+        tensor_with_boundary_tokens[:, 1:-1, :] = tensor
+        for i, j in enumerate(sequence_lengths):
+            tensor_with_boundary_tokens[i, 0, :] = sentence_begin_token
+            tensor_with_boundary_tokens[i, j + 1, :] = sentence_end_token
+        new_mask = ((tensor_with_boundary_tokens > 0).long().sum(dim=-1) > 0).long()
+    else:
+        raise ValueError("add_sentence_boundary_token_ids only accepts 2D and 3D input")
+
+    return tensor_with_boundary_tokens, new_mask

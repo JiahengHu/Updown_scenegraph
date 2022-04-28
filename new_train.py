@@ -1,5 +1,5 @@
 from allennlp.data import Vocabulary
-from datasets import TrainingDataset
+from datasets import TrainingDataset, ValidationDataset
 import argparse
 import shutil
 import time
@@ -20,6 +20,7 @@ def main():
     Training and validation.
     """
     # read vocabulary
+    global vocabulary
     vocabulary = Vocabulary.from_files("data/vocabulary")
     vocab_size = vocabulary.get_vocab_size()
     # Initialize / load checkpoint
@@ -33,7 +34,8 @@ def main():
                           cgat_obj_info=args.cgat_obj_info,
                           cgat_rel_info=args.cgat_rel_info,
                           cgat_k_steps=args.cgat_k_steps,
-                          cgat_update_rel=args.cgat_update_rel
+                          cgat_update_rel=args.cgat_update_rel,
+                          vocabulary=vocabulary
                           )
         decoder_optimizer = torch.optim.Adamax(params=filter(lambda p: p.requires_grad, decoder.parameters()))
         tracking = {'eval': [], 'test': None}
@@ -59,16 +61,21 @@ def main():
     criterion_ce = nn.CrossEntropyLoss().to(device)
     criterion_dis = nn.MultiLabelMarginLoss().to(device)
 
-    # image_features_h5path = "data/coco_train2017_vg_detector_features_adaptive.h5"
-    # captions_jsonpath = "data/coco/captions_train2017.json"
+    train_image_features_h5path = "/home/ubuntu/jeff/dataset/coco_train2017_vg_detector_features_adaptive.h5"
+    train_captions_jsonpath = "data/coco/captions_train2017.json"
 
     # for now we are training with the validation dataset (since it is smaller)
-    image_features_h5path = "data/coco_val2017_vg_detector_features_adaptive.h5"
-    captions_jsonpath = "data/coco/captions_val2017.json"
+    val_image_features_h5path = "/home/ubuntu/jeff/dataset/coco_val2017_vg_detector_features_adaptive.h5"
+    val_captions_jsonpath = "data/coco/captions_val2017.json"
 
     # Custom dataloaders
     train_loader = torch.utils.data.DataLoader(TrainingDataset(args.data_folder, vocabulary,
-                                                               captions_jsonpath, image_features_h5path),
+                                                               train_captions_jsonpath, train_image_features_h5path),
+                                               batch_size=args.batch_size, shuffle=True,
+                                               num_workers=args.workers, pin_memory=True)
+
+    val_loader = torch.utils.data.DataLoader(ValidationDataset(args.data_folder, vocabulary,
+                                                               val_captions_jsonpath, val_image_features_h5path),
                                                batch_size=args.batch_size, shuffle=True,
                                                num_workers=args.workers, pin_memory=True)
 
@@ -91,14 +98,12 @@ def main():
               decoder_optimizer=decoder_optimizer,
               epoch=epoch)
 
-        is_best = True
-        # # TODO: validation
-        # # One epoch's validation
-        # recent_results = validate(val_loader=val_loader,
-        #                           decoder=decoder,
-        #                           criterion_ce=criterion_ce,
-        #                           criterion_dis=criterion_dis,
-        #                           epoch=epoch)
+        # One epoch's validation
+        validate(val_loader=val_loader,
+                                  decoder=decoder,
+                                  criterion_ce=criterion_ce,
+                                  criterion_dis=criterion_dis,
+                                  epoch=epoch)
         # tracking['eval'].append(recent_results)
         # recent_stopping_score = recent_results[args.stopping_metric]
         #
@@ -111,6 +116,8 @@ def main():
         # else:
         #     epochs_since_improvement = 0
         #     best_epoch = epoch
+
+        is_best = True
 
         # Save checkpoint
         save_checkpoint(args.data_name, epoch, epochs_since_improvement, decoder, decoder_optimizer,
@@ -159,6 +166,7 @@ def train(train_loader, decoder, criterion_ce, criterion_dis, decoder_optimizer,
         # Max-pooling across predicted words across time steps for discriminative supervision
         scores_d = scores_d.max(1)[0]
 
+
         # Since we decoded starting with <start>, the targets are all words after <start>, up to <end>
         targets = caps_sorted[:, 1:]
         targets_d = torch.zeros(scores_d.size(0), scores_d.size(1)).to(device)
@@ -175,6 +183,7 @@ def train(train_loader, decoder, criterion_ce, criterion_dis, decoder_optimizer,
         loss_d = criterion_dis(scores_d, targets_d.long())
         loss_g = criterion_ce(scores, targets)
         loss = loss_g + (10 * loss_d)
+
 
         # Back prop.
         decoder_optimizer.zero_grad()
@@ -294,62 +303,76 @@ def validate(val_loader, decoder, criterion_ce, criterion_dis, epoch):
                                                                                 batch_time=batch_time,
                                                                                 loss=losses, top5=top5accs))
 
-            # Store references (true captions), and hypothesis (prediction) for each image
-            # If for n images, we have n hypotheses, and references a, b, c... for each image, we need -
-            # references = [[ref1a, ref1b, ref1c], [ref2a, ref2b], ...], hypotheses = [hyp1, hyp2, ...]
 
-            # References
-            assert (len(sort_ind) == 1), "Cannot have batch_size>1 for validation."
-            # a reference is a list of lists:
-            # [['the', 'cat', 'sat', 'on', 'the', 'mat'], ['a', 'cat', 'on', 'the', 'mat']]
-            references.append(orig_caps)
+                instance_predictions = scores_d[0, :]
 
-            # Hypotheses
-            _, preds = torch.max(scores_copy, dim=2)
-            preds = preds.tolist()
-            preds_idxs_no_pads = list()
-            for j, p in enumerate(preds):
-                preds_idxs_no_pads.append(preds[j][:decode_lengths[j]])  # remove pads
-                preds_idxs_no_pads = list(map(lambda c: [w for w in c if w not in {word_map['<start>'],
-                                                                                   word_map['<pad>']}],
-                                              preds_idxs_no_pads))
-            temp_preds = list()
-            # remove <start> and pads and convert idxs to string
-            for hyp in preds_idxs_no_pads:
-                temp_preds.append([])
-                for w in hyp:
-                    assert (not w == word_map['pad']), "Should have removed all pads."
-                    if not w == word_map['<start>']:
-                        temp_preds[-1].append(word_map_inv[w])
-            preds = temp_preds
-            hypotheses.extend(preds)
-            assert len(references) == len(hypotheses)
+                # De-tokenize caption tokens and trim until first "@@BOUNDARY@@".
+                caption = [
+                    vocabulary.get_token_from_index(p.item()) for p in instance_predictions
+                ]
+                eos_occurences = [
+                    j for j in range(len(caption)) if caption[j] == "@@BOUNDARY@@"
+                ]
+                caption = (
+                    caption[: eos_occurences[0]] if len(eos_occurences) > 0 else caption
+                )
+                print({"caption": " ".join(caption)})
 
-    # Calculate BLEU-4 scores
-    # compute the metrics
-    hypotheses_file = os.path.join(args.outdir, 'hypotheses', 'Epoch{:0>3d}.Hypotheses.json'.format(epoch))
-    references_file = os.path.join(args.outdir, 'references', 'Epoch{:0>3d}.References.json'.format(epoch))
-    create_captions_file(range(len(hypotheses)), hypotheses, hypotheses_file)
-    create_captions_file(range(len(references)), references, references_file)
-    coco = COCO(references_file)
-    # add the predicted results to the object
-    coco_results = coco.loadRes(hypotheses_file)
-    # create the evaluation object with both the ground-truth and the predictions
-    coco_eval = COCOEvalCap(coco, coco_results)
-    # change to use the image ids in the results object, not those from the ground-truth
-    coco_eval.params['image_id'] = coco_results.getImgIds()
-    # run the evaluation
-    coco_eval.evaluate(verbose=False, metrics=['bleu', 'meteor', 'rouge', 'cider'])
-    # Results contains: "Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4", "METEOR", "ROUGE_L", "CIDEr", "SPICE"
-    results = coco_eval.eval
-    results['loss'] = losses.avg
-    results['top5'] = top5accs.avg
+    decoder.train()
 
-    for k, v in results.items():
-        print(k+':\t'+str(v))
-    # print('\n * LOSS - {loss.avg:.3f}, TOP-5 ACCURACY - {top5.avg:.3f}, BLEU-4 - {bleu}, CIDEr - {cider}\n'
-    #       .format(loss=losses, top5=top5accs, bleu=round(results['Bleu_4'], 4), cider=round(results['CIDEr'], 1)))
-    return results
+
+
+    #
+    #         # a reference is a list of lists:
+    #         # [['the', 'cat', 'sat', 'on', 'the', 'mat'], ['a', 'cat', 'on', 'the', 'mat']]
+    #         references.append(orig_caps)
+    #
+    #         # Hypotheses
+    #         _, preds = torch.max(scores_copy, dim=2)
+    #         preds = preds.tolist()
+    #         preds_idxs_no_pads = list()
+    #         for j, p in enumerate(preds):
+    #             preds_idxs_no_pads.append(preds[j][:decode_lengths[j]])  # remove pads
+    #             preds_idxs_no_pads = list(map(lambda c: [w for w in c if w not in {word_map['<start>'],
+    #                                                                                word_map['<pad>']}],
+    #                                           preds_idxs_no_pads))
+    #         temp_preds = list()
+    #         # remove <start> and pads and convert idxs to string
+    #         for hyp in preds_idxs_no_pads:
+    #             temp_preds.append([])
+    #             for w in hyp:
+    #                 assert (not w == word_map['pad']), "Should have removed all pads."
+    #                 if not w == word_map['<start>']:
+    #                     temp_preds[-1].append(word_map_inv[w])
+    #         preds = temp_preds
+    #         hypotheses.extend(preds)
+    #         assert len(references) == len(hypotheses)
+    #
+    # # Calculate BLEU-4 scores
+    # # compute the metrics
+    # hypotheses_file = os.path.join(args.outdir, 'hypotheses', 'Epoch{:0>3d}.Hypotheses.json'.format(epoch))
+    # references_file = os.path.join(args.outdir, 'references', 'Epoch{:0>3d}.References.json'.format(epoch))
+    # create_captions_file(range(len(hypotheses)), hypotheses, hypotheses_file)
+    # create_captions_file(range(len(references)), references, references_file)
+    # coco = COCO(references_file)
+    # # add the predicted results to the object
+    # coco_results = coco.loadRes(hypotheses_file)
+    # # create the evaluation object with both the ground-truth and the predictions
+    # coco_eval = COCOEvalCap(coco, coco_results)
+    # # change to use the image ids in the results object, not those from the ground-truth
+    # coco_eval.params['image_id'] = coco_results.getImgIds()
+    # # run the evaluation
+    # coco_eval.evaluate(verbose=False, metrics=['bleu', 'meteor', 'rouge', 'cider'])
+    # # Results contains: "Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4", "METEOR", "ROUGE_L", "CIDEr", "SPICE"
+    # results = coco_eval.eval
+    # results['loss'] = losses.avg
+    # results['top5'] = top5accs.avg
+    #
+    # for k, v in results.items():
+    #     print(k+':\t'+str(v))
+    # # print('\n * LOSS - {loss.avg:.3f}, TOP-5 ACCURACY - {top5.avg:.3f}, BLEU-4 - {bleu}, CIDEr - {cider}\n'
+    # #       .format(loss=losses, top5=top5accs, bleu=round(results['Bleu_4'], 4), cider=round(results['CIDEr'], 1)))
+    # return results
 
 if __name__ == '__main__':
     metrics = ["CIDEr", "SPICE", "loss", "top5"]
@@ -362,7 +385,7 @@ if __name__ == '__main__':
     parser.add_argument('--print_freq', default=100, type=int, help='print training stats every __ batches')
     parser.add_argument('--print_freq_val', default=1000, type=int, help='print validation stats every __ batches')
     parser.add_argument('--checkpoint', default=None, type=str, help='path to checkpoint, None if none')
-    parser.add_argument('--outdir', default='outputs', type=str,
+    parser.add_argument('--outdir', default='/home/ubuntu/jeff/outputs', type=str,
                         help='path to location where to save outputs. Empty for current working dir')
     parser.add_argument('--workers', default=1, type=int)
     parser.add_argument('--batch_size', default=100, type=int, help='batch size')
@@ -394,17 +417,17 @@ if __name__ == '__main__':
     # torch.backends.cudnn.benchmark = False
     torch.manual_seed(args.seed)
 
-    args.outdir = os.path.join(args.outdir,
-                               'cascade_sg_first_contextGAT',
-                               'batch_size-{bs}_epochs-{ep}_dropout-{drop}_patience-{pat}_stop-metric-{met}'.format(
-                                   bs=args.batch_size, ep=args.epochs, drop=args.dropout,
-                                   pat=args.patience, met=args.stopping_metric),
-                               'emb-{emb}_att-{att}_dec-{dec}'.format(emb=args.emb_dim, att=args.attention_dim,
-                                                                      dec=args.decoder_dim),
-                               'cgat_useobj-{o}_userel-{r}_ksteps-{k}_updaterel-{u}'.format(
-                                   o=args.cgat_obj_info, r=args.cgat_rel_info, k=args.cgat_k_steps,
-                                   u=args.cgat_update_rel),
-                               'seed-{}'.format(args.seed))
+    # args.outdir = os.path.join(args.outdir,
+    #                            'cascade_sg_first_contextGAT',
+    #                            'batch_size-{bs}_epochs-{ep}_dropout-{drop}_patience-{pat}_stop-metric-{met}'.format(
+    #                                bs=args.batch_size, ep=args.epochs, drop=args.dropout,
+    #                                pat=args.patience, met=args.stopping_metric),
+    #                            'emb-{emb}_att-{att}_dec-{dec}'.format(emb=args.emb_dim, att=args.attention_dim,
+    #                                                                   dec=args.decoder_dim),
+    #                            'cgat_useobj-{o}_userel-{r}_ksteps-{k}_updaterel-{u}'.format(
+    #                                o=args.cgat_obj_info, r=args.cgat_rel_info, k=args.cgat_k_steps,
+    #                                u=args.cgat_update_rel),
+    #                            'seed-{}'.format(args.seed))
     if os.path.exists(args.outdir) and args.checkpoint is None:
         answer = input("\n\t!! WARNING !! \nthe specified --outdir already exists, "
                        "probably from previous experiments: \n\t{}\n"
