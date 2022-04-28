@@ -68,11 +68,12 @@ def main():
     val_image_features_h5path = "/home/ubuntu/jeff/dataset/coco_val2017_vg_detector_features_adaptive.h5"
     val_captions_jsonpath = "data/coco/captions_val2017.json"
 
-    # Custom dataloaders
-    train_loader = torch.utils.data.DataLoader(TrainingDataset(args.data_folder, vocabulary,
-                                                               train_captions_jsonpath, train_image_features_h5path),
-                                               batch_size=args.batch_size, shuffle=True,
-                                               num_workers=args.workers, pin_memory=True)
+    if not args.test_val:
+        # Custom dataloaders
+        train_loader = torch.utils.data.DataLoader(TrainingDataset(args.data_folder, vocabulary,
+                                                                   train_captions_jsonpath, train_image_features_h5path),
+                                                   batch_size=args.batch_size, shuffle=True,
+                                                   num_workers=args.workers, pin_memory=True)
 
     val_loader = torch.utils.data.DataLoader(ValidationDataset(args.data_folder, vocabulary,
                                                                val_captions_jsonpath, val_image_features_h5path),
@@ -90,32 +91,22 @@ def main():
         if epochs_since_improvement > 0 and epochs_since_improvement % 8 == 0:
             adjust_learning_rate(decoder_optimizer, 0.8)
 
-        # One epoch's training
-        train(train_loader=train_loader,
-              decoder=decoder,
-              criterion_ce=criterion_ce,
-              criterion_dis=criterion_dis,
-              decoder_optimizer=decoder_optimizer,
-              epoch=epoch)
+        if not args.test_val:
+            # One epoch's training
+            train(train_loader=train_loader,
+                  decoder=decoder,
+                  criterion_ce=criterion_ce,
+                  criterion_dis=criterion_dis,
+                  decoder_optimizer=decoder_optimizer,
+                  epoch=epoch)
 
         # One epoch's validation
         validate(val_loader=val_loader,
-                                  decoder=decoder,
-                                  criterion_ce=criterion_ce,
-                                  criterion_dis=criterion_dis,
-                                  epoch=epoch)
-        # tracking['eval'].append(recent_results)
-        # recent_stopping_score = recent_results[args.stopping_metric]
-        #
-        # # Check if there was an improvement
-        # is_best = recent_stopping_score > best_stopping_score
-        # best_stopping_score = max(recent_stopping_score, best_stopping_score)
-        # if not is_best:
-        #     epochs_since_improvement += 1
-        #     print("\nEpochs since last improvement: %d\n" % (epochs_since_improvement,))
-        # else:
-        #     epochs_since_improvement = 0
-        #     best_epoch = epoch
+                      decoder=decoder,
+                      criterion_ce=criterion_ce,
+                      criterion_dis=criterion_dis,
+                      epoch=epoch)
+
 
         is_best = True
 
@@ -406,6 +397,7 @@ if __name__ == '__main__':
                         help='stop training when metric doesnt improve for this many epochs')
     parser.add_argument('--stopping_metric', default='Bleu_4', type=str, choices=metrics,
                         help='which metric to use for early stopping')
+    parser.add_argument('--test_eval', default=False, action="store_true",)
 
     # Parse the arguments
     args = parser.parse_args()
