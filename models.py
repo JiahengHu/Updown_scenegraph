@@ -253,12 +253,6 @@ class Decoder(nn.Module):
             self._boundary_index,
         )
 
-
-        # # what is this used for?
-        # # shape: (batch_size, max_caption_length)
-        # batch_size, max_caption_length = caption_tokens.size()
-        # tokens_mask = caption_tokens != self._pad_index
-
         # Embedding
         embeddings = self.embedding(encoded_captions)  # (batch_size, max_caption_length, embed_dim)
 

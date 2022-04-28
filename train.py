@@ -1,3 +1,5 @@
+from allennlp.data import Vocabulary
+from datasets import TrainingDataset, ValidationDataset
 import argparse
 import shutil
 import time
@@ -10,41 +12,30 @@ import pickle
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
 from models import Decoder
-from datasets import CaptionDataset
 from utils import collate_fn, save_checkpoint, AverageMeter, adjust_learning_rate, accuracy, create_captions_file
-from pycocotools.coco import COCO
-from pycocoevalcap.eval import COCOEvalCap
-from eval import beam_evaluate
-
-word_map = word_map_inv = None
 
 
 def main():
     """
     Training and validation.
     """
-
-    global word_map, word_map_inv
-
-    # Read word map
-    word_map_file = os.path.join(args.data_folder, 'WORDMAP_' + args.data_name + '.json')
-    with open(word_map_file, 'r') as j:
-        word_map = json.load(j)
-        # create inverse word map
-    word_map_inv = {v: k for k, v in word_map.items()}
-
+    # read vocabulary
+    global vocabulary
+    vocabulary = Vocabulary.from_files("data/vocabulary")
+    vocab_size = vocabulary.get_vocab_size()
     # Initialize / load checkpoint
     if args.checkpoint is None:
         decoder = Decoder(attention_dim=args.attention_dim,
                           embed_dim=args.emb_dim,
                           decoder_dim=args.decoder_dim,
                           graph_features_dim=args.graph_features_dim,
-                          vocab_size=len(word_map),
+                          vocab_size=vocab_size,
                           dropout=args.dropout,
                           cgat_obj_info=args.cgat_obj_info,
                           cgat_rel_info=args.cgat_rel_info,
                           cgat_k_steps=args.cgat_k_steps,
-                          cgat_update_rel=args.cgat_update_rel
+                          cgat_update_rel=args.cgat_update_rel,
+                          vocabulary=vocabulary
                           )
         decoder_optimizer = torch.optim.Adamax(params=filter(lambda p: p.requires_grad, decoder.parameters()))
         tracking = {'eval': [], 'test': None}
@@ -70,16 +61,26 @@ def main():
     criterion_ce = nn.CrossEntropyLoss().to(device)
     criterion_dis = nn.MultiLabelMarginLoss().to(device)
 
-    # Custom dataloaders
-    train_loader = torch.utils.data.DataLoader(CaptionDataset(args.data_folder, args.data_name, 'TRAIN'),
+    train_image_features_h5path = "/home/ubuntu/jeff/dataset/coco_train2017_vg_detector_features_adaptive.h5"
+    train_captions_jsonpath = "data/coco/captions_train2017.json"
+
+    # for now we are training with the validation dataset (since it is smaller)
+    val_image_features_h5path = "/home/ubuntu/jeff/dataset/coco_val2017_vg_detector_features_adaptive.h5"
+    val_captions_jsonpath = "data/coco/captions_val2017.json"
+
+    if not args.test_val:
+        # Custom dataloaders
+        train_loader = torch.utils.data.DataLoader(TrainingDataset(args.data_folder, vocabulary,
+                                                                   train_captions_jsonpath, train_image_features_h5path),
+                                                   batch_size=args.batch_size, shuffle=True,
+                                                   num_workers=args.workers, pin_memory=True)
+
+    val_loader = torch.utils.data.DataLoader(ValidationDataset(args.data_folder, vocabulary,
+                                                               val_captions_jsonpath, val_image_features_h5path),
                                                batch_size=args.batch_size, shuffle=True,
                                                num_workers=args.workers, pin_memory=True)
-    val_loader = torch.utils.data.DataLoader(CaptionDataset(args.data_folder, args.data_name, 'VAL'),
-                                             collate_fn=collate_fn,
-                                             # use our specially designed collate function with valid/test only
-                                             batch_size=1, shuffle=False,
-                                             num_workers=args.workers, pin_memory=True)
-    # batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
+
+
 
     # Epochs
     for epoch in range(start_epoch, args.epochs):
@@ -90,46 +91,31 @@ def main():
         if epochs_since_improvement > 0 and epochs_since_improvement % 8 == 0:
             adjust_learning_rate(decoder_optimizer, 0.8)
 
-        # One epoch's training
-        train(train_loader=train_loader,
-              decoder=decoder,
-              criterion_ce=criterion_ce,
-              criterion_dis=criterion_dis,
-              decoder_optimizer=decoder_optimizer,
-              epoch=epoch)
+        if not args.test_val:
+            # One epoch's training
+            train(train_loader=train_loader,
+                  decoder=decoder,
+                  criterion_ce=criterion_ce,
+                  criterion_dis=criterion_dis,
+                  decoder_optimizer=decoder_optimizer,
+                  epoch=epoch)
 
         # One epoch's validation
-        recent_results = validate(val_loader=val_loader,
-                                  decoder=decoder,
-                                  criterion_ce=criterion_ce,
-                                  criterion_dis=criterion_dis,
-                                  epoch=epoch)
-        tracking['eval'].append(recent_results)
-        recent_stopping_score = recent_results[args.stopping_metric]
+        validate(val_loader=val_loader,
+                      decoder=decoder,
+                      criterion_ce=criterion_ce,
+                      criterion_dis=criterion_dis,
+                      epoch=epoch)
 
-        # Check if there was an improvement
-        is_best = recent_stopping_score > best_stopping_score
-        best_stopping_score = max(recent_stopping_score, best_stopping_score)
-        if not is_best:
-            epochs_since_improvement += 1
-            print("\nEpochs since last improvement: %d\n" % (epochs_since_improvement,))
-        else:
-            epochs_since_improvement = 0
-            best_epoch = epoch
+
+        is_best = True
 
         # Save checkpoint
         save_checkpoint(args.data_name, epoch, epochs_since_improvement, decoder, decoder_optimizer,
                         args.stopping_metric, best_stopping_score, tracking, is_best, args.outdir, best_epoch)
 
-    # if needed, run an beamsearch evaluation on the test set
-    if args.test_at_end:
-        checkpoint_file = 'BEST_' + str(best_epoch) + '_' + 'checkpoint_' + args.data_name + '.pth.tar'
-        results = beam_evaluate(args.data_name, checkpoint_file, args.data_folder, args.beam_size, args.outdir,
-                                args.graph_features_dim)
-        tracking['test'] = results
     with open(os.path.join(args.outdir, 'TRACKING.'+args.data_name+'.pkl'), 'wb') as f:
         pickle.dump(tracking, f)
-
 
 def train(train_loader, decoder, criterion_ce, criterion_dis, decoder_optimizer, epoch):
     """
@@ -171,6 +157,7 @@ def train(train_loader, decoder, criterion_ce, criterion_dis, decoder_optimizer,
         # Max-pooling across predicted words across time steps for discriminative supervision
         scores_d = scores_d.max(1)[0]
 
+
         # Since we decoded starting with <start>, the targets are all words after <start>, up to <end>
         targets = caps_sorted[:, 1:]
         targets_d = torch.zeros(scores_d.size(0), scores_d.size(1)).to(device)
@@ -187,6 +174,7 @@ def train(train_loader, decoder, criterion_ce, criterion_dis, decoder_optimizer,
         loss_d = criterion_dis(scores_d, targets_d.long())
         loss_g = criterion_ce(scores, targets)
         loss = loss_g + (10 * loss_d)
+
 
         # Back prop.
         decoder_optimizer.zero_grad()
@@ -216,7 +204,6 @@ def train(train_loader, decoder, criterion_ce, criterion_dis, decoder_optimizer,
                                                                           batch_time=batch_time,
                                                                           data_time=data_time, loss=losses,
                                                                           top5=top5accs))
-
 
 def validate(val_loader, decoder, criterion_ce, criterion_dis, epoch):
     """
@@ -255,7 +242,7 @@ def validate(val_loader, decoder, criterion_ce, criterion_dis, epoch):
                                                                                     loss=losses, top5=top5accs))
                 continue
 
-            (imgs, obj, rel, obj_mask, rel_mask, pair_idx, caps, caplens, orig_caps) = sample
+            (imgs, obj, rel, obj_mask, rel_mask, pair_idx, caps, caplens) = sample
             # Move to GPU, if available
             imgs = imgs.to(device)
             obj = obj.to(device)
@@ -307,80 +294,39 @@ def validate(val_loader, decoder, criterion_ce, criterion_dis, epoch):
                                                                                 batch_time=batch_time,
                                                                                 loss=losses, top5=top5accs))
 
-            # Store references (true captions), and hypothesis (prediction) for each image
-            # If for n images, we have n hypotheses, and references a, b, c... for each image, we need -
-            # references = [[ref1a, ref1b, ref1c], [ref2a, ref2b], ...], hypotheses = [hyp1, hyp2, ...]
+                _, preds = torch.max(scores_copy, dim=2)
+                # print(preds)
+                instance_predictions = preds[0].tolist()
 
-            # References
-            assert (len(sort_ind) == 1), "Cannot have batch_size>1 for validation."
-            # a reference is a list of lists:
-            # [['the', 'cat', 'sat', 'on', 'the', 'mat'], ['a', 'cat', 'on', 'the', 'mat']]
-            references.append(orig_caps)
+                # De-tokenize caption tokens and trim until first "@@BOUNDARY@@".
+                caption = [
+                    vocabulary.get_token_from_index(p) for p in instance_predictions
+                ]
+                eos_occurences = [
+                    j for j in range(len(caption)) if caption[j] == "@@BOUNDARY@@"
+                ]
+                caption = (
+                    caption[: eos_occurences[0]] if len(eos_occurences) > 0 else caption
+                )
+                print({"caption": " ".join(caption)})
 
-            # Hypotheses
-            _, preds = torch.max(scores_copy, dim=2)
-            preds = preds.tolist()
-            preds_idxs_no_pads = list()
-            for j, p in enumerate(preds):
-                preds_idxs_no_pads.append(preds[j][:decode_lengths[j]])  # remove pads
-                preds_idxs_no_pads = list(map(lambda c: [w for w in c if w not in {word_map['<start>'],
-                                                                                   word_map['<pad>']}],
-                                              preds_idxs_no_pads))
-            temp_preds = list()
-            # remove <start> and pads and convert idxs to string
-            for hyp in preds_idxs_no_pads:
-                temp_preds.append([])
-                for w in hyp:
-                    assert (not w == word_map['pad']), "Should have removed all pads."
-                    if not w == word_map['<start>']:
-                        temp_preds[-1].append(word_map_inv[w])
-            preds = temp_preds
-            hypotheses.extend(preds)
-            assert len(references) == len(hypotheses)
-
-    # Calculate BLEU-4 scores
-    # compute the metrics
-    hypotheses_file = os.path.join(args.outdir, 'hypotheses', 'Epoch{:0>3d}.Hypotheses.json'.format(epoch))
-    references_file = os.path.join(args.outdir, 'references', 'Epoch{:0>3d}.References.json'.format(epoch))
-    create_captions_file(range(len(hypotheses)), hypotheses, hypotheses_file)
-    create_captions_file(range(len(references)), references, references_file)
-    coco = COCO(references_file)
-    # add the predicted results to the object
-    coco_results = coco.loadRes(hypotheses_file)
-    # create the evaluation object with both the ground-truth and the predictions
-    coco_eval = COCOEvalCap(coco, coco_results)
-    # change to use the image ids in the results object, not those from the ground-truth
-    coco_eval.params['image_id'] = coco_results.getImgIds()
-    # run the evaluation
-    coco_eval.evaluate(verbose=False, metrics=['bleu', 'meteor', 'rouge', 'cider'])
-    # Results contains: "Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4", "METEOR", "ROUGE_L", "CIDEr", "SPICE"
-    results = coco_eval.eval
-    results['loss'] = losses.avg
-    results['top5'] = top5accs.avg
-
-    for k, v in results.items():
-        print(k+':\t'+str(v))
-    # print('\n * LOSS - {loss.avg:.3f}, TOP-5 ACCURACY - {top5.avg:.3f}, BLEU-4 - {bleu}, CIDEr - {cider}\n'
-    #       .format(loss=losses, top5=top5accs, bleu=round(results['Bleu_4'], 4), cider=round(results['CIDEr'], 1)))
-    return results
+    decoder.train()
 
 
 if __name__ == '__main__':
-    metrics = ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4", "METEOR", "ROUGE_L", "CIDEr", "SPICE", "loss", "top5"]
-    parser = argparse.ArgumentParser('Image Captioning')
+    metrics = ["CIDEr", "SPICE", "loss", "top5"]
+    parser = argparse.ArgumentParser('Nocap')
     # Add config file arguments
-    parser.add_argument('--data_folder', default='final_dataset', type=str,
+    parser.add_argument('--data_folder', default='data', type=str,
                         help='folder with data files saved by create_input_files.py')
     parser.add_argument('--data_name', default='coco_5_cap_per_img_5_min_word_freq', type=str,
                         help='base name shared by data files')
     parser.add_argument('--print_freq', default=100, type=int, help='print training stats every __ batches')
-    parser.add_argument('--print_freq_val', default=1000, type=int, help='print validation stats every __ batches')
+    parser.add_argument('--print_freq_val', default=50, type=int, help='print validation stats every __ batches')
     parser.add_argument('--checkpoint', default=None, type=str, help='path to checkpoint, None if none')
-    parser.add_argument('--outdir', default='outputs', type=str,
+    parser.add_argument('--outdir', default='/home/ubuntu/jeff/outputs', type=str,
                         help='path to location where to save outputs. Empty for current working dir')
-    parser.add_argument('--workers', default=1, type=int,
-                        help='for data-loading; right now, only 1 works with h5py '
-                             '(OUTDATED, h5py can have multiple reads, right)')
+    parser.add_argument('--workers', default=1, type=int)
     parser.add_argument('--batch_size', default=100, type=int, help='batch size')
     parser.add_argument('--seed', default=42, type=int, help='The random seed that will be used.')
     parser.add_argument('--emb_dim', default=1024, type=int, help='dimension of word embeddings')
@@ -399,8 +345,7 @@ if __name__ == '__main__':
                         help='stop training when metric doesnt improve for this many epochs')
     parser.add_argument('--stopping_metric', default='Bleu_4', type=str, choices=metrics,
                         help='which metric to use for early stopping')
-    parser.add_argument('--test_at_end', default=True, type=bool, help='If there should be tested on the test split')
-    parser.add_argument('--beam_size', default=5, type=int, help='If test at end, beam size to use for testing.')
+    parser.add_argument('--test_val', default=False, action="store_true",)
 
     # Parse the arguments
     args = parser.parse_args()
@@ -412,31 +357,31 @@ if __name__ == '__main__':
     # torch.backends.cudnn.benchmark = False
     torch.manual_seed(args.seed)
 
-    args.outdir = os.path.join(args.outdir,
-                               'cascade_sg_first_contextGAT',
-                               'batch_size-{bs}_epochs-{ep}_dropout-{drop}_patience-{pat}_stop-metric-{met}'.format(
-                                   bs=args.batch_size, ep=args.epochs, drop=args.dropout,
-                                   pat=args.patience, met=args.stopping_metric),
-                               'emb-{emb}_att-{att}_dec-{dec}'.format(emb=args.emb_dim, att=args.attention_dim,
-                                                                      dec=args.decoder_dim),
-                               'cgat_useobj-{o}_userel-{r}_ksteps-{k}_updaterel-{u}'.format(
-                                   o=args.cgat_obj_info, r=args.cgat_rel_info, k=args.cgat_k_steps,
-                                   u=args.cgat_update_rel),
-                               'seed-{}'.format(args.seed))
+    # args.outdir = os.path.join(args.outdir,
+    #                            'cascade_sg_first_contextGAT',
+    #                            'batch_size-{bs}_epochs-{ep}_dropout-{drop}_patience-{pat}_stop-metric-{met}'.format(
+    #                                bs=args.batch_size, ep=args.epochs, drop=args.dropout,
+    #                                pat=args.patience, met=args.stopping_metric),
+    #                            'emb-{emb}_att-{att}_dec-{dec}'.format(emb=args.emb_dim, att=args.attention_dim,
+    #                                                                   dec=args.decoder_dim),
+    #                            'cgat_useobj-{o}_userel-{r}_ksteps-{k}_updaterel-{u}'.format(
+    #                                o=args.cgat_obj_info, r=args.cgat_rel_info, k=args.cgat_k_steps,
+    #                                u=args.cgat_update_rel),
+    #                            'seed-{}'.format(args.seed))
     if os.path.exists(args.outdir) and args.checkpoint is None:
-        answer = input("\n\t!! WARNING !! \nthe specified --outdir already exists, "
-                       "probably from previous experiments: \n\t{}\n"
-                       "Ist it okay to delete it and all its content for current experiment? "
-                       "(Yes/No) .. ".format(args.outdir))
-        if answer.lower() == "yes":
-            print('SAVE_DIR will be deleted ...')
-            shutil.rmtree(args.outdir)
-            os.makedirs(os.path.join(args.outdir, 'hypotheses'), exist_ok=True)
-            os.makedirs(os.path.join(args.outdir, 'references'), exist_ok=True)
-        else:
-            print('To run this experiment and preserve the other one, change some settings, like the --seed.\n'
-                  '\tExiting Program...')
-            exit(0)
+        # answer = input("\n\t!! WARNING !! \nthe specified --outdir already exists, "
+        #                "probably from previous experiments: \n\t{}\n"
+        #                "Ist it okay to delete it and all its content for current experiment? "
+        #                "(Yes/No) .. ".format(args.outdir))
+        # if answer.lower() == "yes":
+        print('SAVE_DIR will be deleted ...')
+        shutil.rmtree(args.outdir)
+        os.makedirs(os.path.join(args.outdir, 'hypotheses'), exist_ok=True)
+        os.makedirs(os.path.join(args.outdir, 'references'), exist_ok=True)
+        # else:
+        #     print('To run this experiment and preserve the other one, change some settings, like the --seed.\n'
+        #           '\tExiting Program...')
+        #     exit(0)
     elif os.path.exists(args.outdir) and args.checkpoint is not None:
         print('continueing from checkpoint {} in {}...'.format(args.checkpoint, args.outdir))
     elif not os.path.exists(args.outdir) and args.checkpoint is not None:

@@ -1,44 +1,38 @@
 <h1> Image captioning with scene graph </h1>
+Deep learning project by Jiaheng Hu
 
 <h2> Data preparation </h2>
 
 Create a folder called 'data'
 
-Unzip all files and place the folders in 'data' folder.
+Unzip all files (captions and images) and place the folders in 'data' folder.
 
 <br>
 
-Set up the graph-rcnn.pytorch repository.
+Set up the graph-rcnn.pytorch repository at https://github.com/jwyang/graph-rcnn.pytorch.
+Download the imp_relpn weight and place it in ./weights
 
 <br>
+
 Next type this command in a python environment: 
 ```bash
-python bottom-up_features/create_sg_h5.py
+cd bottom-up_features
+python create_sg_h5.py
 ```
-
-
+This will create the scene graph features.
 <br>
-
-Although we make use of the official COCO captioning evaluation scripts, for legacy kept the nl_eval_master folder. 
-
-Next, go to nlg_eval_master folder and type the following two commands:
-```bash
-pip install -e .
-nlg-eval --setup
-```
-This will install all the files needed for evaluation. 
 
 
 <h2> Training </h2>
 
-To train the bottom-up top down model, type:
+To train the model, type:
 ```bash
 python train.py
 ```
 
 <h2> Evaluation </h2>
 
-To evaluate the model on the karpathy test split, edit the eval.py file to include the model checkpoint location and then type:
+To evaluate the model, edit the eval.py file to include the model checkpoint location and then type:
 ```bash
 python eval.py
 ```

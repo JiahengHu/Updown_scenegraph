@@ -139,13 +139,6 @@ class ValidationDataset(Dataset):
         return len(self._captions_reader)
 
 
-#             all_captions = self.orig_captions[((i // self.cpi) * self.cpi):
-#                                               (((i // self.cpi) * self.cpi) + self.cpi)]
-#             # For validation of testing, also return all 'captions_per_image' captions to find BLEU-4 score
-
-#         return self.dataset_size
-
-
 def _collate_image_features(image):
     num_box = image.shape[0]
     image_feature_size = image.shape[-1]
