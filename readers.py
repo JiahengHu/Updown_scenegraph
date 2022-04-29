@@ -14,6 +14,7 @@ import h5py
 from nltk.tokenize import word_tokenize
 import numpy as np
 from tqdm import tqdm
+from collections import defaultdict
 
 
 class ImageFeaturesReader(object):
@@ -116,6 +117,8 @@ class CocoCaptionsReader(object):
         # List of (image id, caption) tuples.
         self._captions: List[Tuple[int, List[str]]] = []
 
+        self.img_2_cap = defaultdict(lambda:[])
+        counter = 0
         print(f"Tokenizing captions from {captions_jsonpath}...")
         for caption_item in tqdm(captions_json["annotations"]):
 
@@ -124,6 +127,8 @@ class CocoCaptionsReader(object):
             caption_tokens = [ct for ct in caption_tokens if ct not in PUNCTUATIONS]
 
             self._captions.append((caption_item["image_id"], caption_tokens))
+            self.img_2_cap[caption_item["image_id"]].append(counter)
+            counter += 1
 
     def __len__(self) -> int:
         return len(self._captions)

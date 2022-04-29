@@ -176,6 +176,11 @@ class ValidationDataset(Dataset):
         image_features = self._image_features_reader[image_id]
         sg_index = self.sg_id[image_id]
 
+        caption_idx = self._captions_reader.img_2_cap[image_id]
+        all_caps = []
+        for idx in caption_idx:
+            all_caps.append(self._captions_reader[idx][1])
+
         obj = torch.tensor(self.val_obj[sg_index], dtype=torch.float)
         rel = torch.tensor(self.val_rel[sg_index], dtype=torch.float)
         obj_mask = torch.tensor(self.val_obj_mask[sg_index], dtype=torch.bool)
@@ -199,7 +204,7 @@ class ValidationDataset(Dataset):
         # Pad adaptive image features in the batch.
         image_features = torch.from_numpy(_collate_image_features(image_features))
 
-        item = [image_features, obj, rel, obj_mask, rel_mask, pair_idx, caption_tokens, caplen]
+        item = [image_features, obj, rel, obj_mask, rel_mask, pair_idx, caption_tokens, caplen, all_caps]
         return item
 
     def __len__(self) -> int:

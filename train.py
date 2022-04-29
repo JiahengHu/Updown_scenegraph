@@ -241,7 +241,7 @@ def validate(val_loader, decoder, criterion_ce, criterion_dis, epoch):
                                                                                     loss=losses, top5=top5accs))
                 continue
 
-            (imgs, obj, rel, obj_mask, rel_mask, pair_idx, caps, caplens) = sample
+            (imgs, obj, rel, obj_mask, rel_mask, pair_idx, caps, caplens, _) = sample
             # Move to GPU, if available
             imgs = imgs.to(device)
             obj = obj.to(device)
