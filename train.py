@@ -64,7 +64,6 @@ def main():
     train_image_features_h5path = "/home/ubuntu/jeff/dataset/coco_train2017_vg_detector_features_adaptive.h5"
     train_captions_jsonpath = "data/coco/captions_train2017.json"
 
-    # for now we are training with the validation dataset (since it is smaller)
     val_image_features_h5path = "/home/ubuntu/jeff/dataset/coco_val2017_vg_detector_features_adaptive.h5"
     val_captions_jsonpath = "data/coco/captions_val2017.json"
 

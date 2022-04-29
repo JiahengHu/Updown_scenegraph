@@ -3,7 +3,6 @@ import json
 import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data
-from datasets import CaptionDataset
 from utils import collate_fn, create_captions_file, create_batched_graphs
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -11,6 +10,8 @@ import dgl
 import argparse
 from pycocotools.coco import COCO
 from pycocoevalcap.eval import COCOEvalCap
+from allennlp.data import Vocabulary
+from datasets import TrainingDataset, ValidationDataset
 
 
 def beam_evaluate(data_name, checkpoint_file, data_folder, beam_size, outdir, graph_feature_dim=512, dataset='TEST'):
@@ -23,7 +24,6 @@ def beam_evaluate(data_name, checkpoint_file, data_folder, beam_size, outdir, gr
     :param outdir: place where the outputs are stored, so the checkpoint file
     :return: Official MSCOCO evaluator scores - bleu4, cider, rouge, meteor
     """
-    global word_map
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def load_model():
@@ -35,23 +35,25 @@ def beam_evaluate(data_name, checkpoint_file, data_folder, beam_size, outdir, gr
         decoder.eval()
         return decoder
 
-    def load_dictionary():
-        # Load word map (word2ix) using data folder provided
-        word_map_file = os.path.join(data_folder, 'WORDMAP_' + data_name + '.json')
-        with open(word_map_file, 'r') as j:
-            word_map = json.load(j)
-        rev_word_map = {v: k for k, v in word_map.items()}
-        vocab_size = len(word_map)
-        return word_map, rev_word_map, vocab_size
 
     decoder = load_model()
-    word_map, rev_word_map, vocab_size = load_dictionary()
+    global vocabulary
+    vocabulary = Vocabulary.from_files("data/vocabulary")
+    vocab_size = vocabulary.get_vocab_size()
+    boundary_index = vocabulary.get_token_index("@@BOUNDARY@@")
+    pad_index = vocabulary.get_token_index("@@UNKNOWN@@")
 
     # DataLoader
+    # TODO: later test with nocaps, first use the validation dataset
+    val_image_features_h5path = "/home/ubuntu/jeff/dataset/coco_val2017_vg_detector_features_adaptive.h5"
+    val_captions_jsonpath = "data/coco/captions_val2017.json"
     loader = torch.utils.data.DataLoader(
-        CaptionDataset(data_folder, data_name, dataset),
+        ValidationDataset(args.data_folder, vocabulary,
+                          val_captions_jsonpath, val_image_features_h5path),
         batch_size=1, shuffle=False, num_workers=1, collate_fn=collate_fn,
         pin_memory=torch.cuda.is_available())
+
+
 
     # Lists to store references (true captions), and hypothesis (prediction) for each image
     # If for n images, we have n hypotheses, and references a, b, c... for each image, we need -
@@ -87,7 +89,7 @@ def beam_evaluate(data_name, checkpoint_file, data_folder, beam_size, outdir, gr
         g = create_batched_graphs(obj, obj_mask, rel, rel_mask, pair_ids, beam_size=k)
 
         # Tensor to store top k previous words at each step; now they're just <start>
-        k_prev_words = torch.tensor([[word_map['<start>']]] * k, dtype=torch.long).to(device)  # (k, 1)
+        k_prev_words = torch.tensor([[boundary_index]] * k, dtype=torch.long).to(device)  # (k, 1)
 
         # Tensor to store top k sequences; now they're just <start>
         seqs = k_prev_words  # (k, 1)
@@ -144,7 +146,7 @@ def beam_evaluate(data_name, checkpoint_file, data_folder, beam_size, outdir, gr
 
             # Which sequences are incomplete (didn't reach <end>)?
             incomplete_inds = [ind for ind, next_word in enumerate(next_word_inds) if
-                               next_word != word_map['<end>']]
+                               next_word != boundary_index]
             complete_inds = list(set(range(len(next_word_inds))) - set(incomplete_inds))
 
             # Set aside complete sequences
@@ -188,7 +190,7 @@ def beam_evaluate(data_name, checkpoint_file, data_folder, beam_size, outdir, gr
         references.append(img_caps)
 
         # Hypotheses
-        hypothesis = ([rev_word_map[w] for w in seq if w not in {word_map['<start>'], word_map['<end>'], word_map['<pad>']}])
+        hypothesis = ([vocabulary.get_token_from_index(w) for w in seq if w not in {boundary_index, pad_index}])
         # hypothesis = ' '.join(hypothesis)
         hypotheses.append(hypothesis)
         assert len(references) == len(hypotheses)
