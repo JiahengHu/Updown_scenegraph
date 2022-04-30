@@ -32,7 +32,7 @@ python train.py
 
 <h2> Evaluation </h2>
 
-To evaluate the model, edit the eval.py file to include the model checkpoint location and then type:
+To evaluate the model on the coco eval dataset, edit the eval.py file to include the model checkpoint location and then type:
 ```bash
 python eval.py
 ```
@@ -40,6 +40,14 @@ python eval.py
 Beam search is used to generate captions during evaluation. Beam search iteratively considers the set of the k best sentences up to time t as candidates to generate sentences of size t + 1, and keeps only the resulting best k of them. A beam search of five is used for inference.
 
 The metrics reported are ones used most often in relation to image captioning and include BLEU-4, CIDEr, METEOR and ROUGE-L. Official MSCOCO evaluation scripts are used for measuring these scores.
+  
+To evaluate the mode on the nocaps datset, setup the updown baseline repo, then type:
+```bash
+python eval_nocaps.py
+python eval_parse_tmp.py
+```
+
+The first script generates the prediction, while the second script reformat and submit the result
   
 <h2>References</h2>
 

@@ -195,14 +195,13 @@ def beam_evaluate(data_name, checkpoint_file, data_folder, beam_size, outdir, gr
     hypotheses_file = os.path.join(outdir, 'nocaps_hypotheses', '{}.{}.Hypotheses.json'.format(dataset,
                                                                                         data_name.split('_')[0]))
 
-    test_file = "tmp_sgg_prediction"
     import pickle
-    with open(test_file, "wb") as fp:  # Pickling
+    with open("tmp_sgg_prediction", "wb") as fp:  # Pickling
         pickle.dump(predictions, fp)
     with open("tmp_imageid", "wb") as fp:  # Pickling
         pickle.dump(img_ids, fp)
 
-    create_captions_file(img_ids, predictions, hypotheses_file)
+    # create_captions_file(img_ids, predictions, hypotheses_file)
 
 
 if __name__ == '__main__':
