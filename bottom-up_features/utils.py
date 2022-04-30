@@ -6,8 +6,8 @@ import numpy as np
 from PIL import Image
 import torch
 import torch.nn as nn
-from PIL import ImageFile
-ImageFile.LOAD_TRUNCATED_IMAGES = True
+# from PIL import ImageFile
+# ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 EPS = 1e-7
 
