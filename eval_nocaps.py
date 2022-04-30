@@ -189,6 +189,7 @@ def beam_evaluate(data_name, checkpoint_file, data_folder, beam_size, outdir, gr
         #     {"image_id": img_id, "caption": hypothesis}
         # )
         img_ids.append(img_id)
+        print(img_id)
 
     # Calculate scores
     # metrics_dict = nlgeval.compute_metrics(references, hypotheses)
