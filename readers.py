@@ -76,6 +76,8 @@ class ImageFeaturesReader(object):
                 for index in range(image_id_np.shape[0])
             }
 
+        self.image_id = image_id_np
+
     def __len__(self) -> int:
         return len(self._map)
 

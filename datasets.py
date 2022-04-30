@@ -212,6 +212,56 @@ class ValidationDataset(Dataset):
         return len(self._captions_reader)
 
 
+
+
+class TestDataset(Dataset):
+    """
+    A PyTorch Dataset class to be used in a PyTorch DataLoader to create batches.
+    """
+
+    def __init__(self, data_folder, image_features_h5path, in_memory=False):
+        """
+        :param data_folder: folder where data files are stored
+        :param data_name: base name of processed datasets
+        :param split: split, one of 'TRAIN', 'VAL', or 'TEST'
+        """
+
+        self._image_features_reader = ImageFeaturesReader(image_features_h5path, in_memory)
+
+        # this is for validation
+        self.sg_val_h5 = h5py.File(data_folder + '/val_scene-graph.hdf5', 'r')
+        self.val_obj = self.sg_val_h5['object_features']
+        self.val_obj_mask = self.sg_val_h5['object_mask']
+        self.val_rel = self.sg_val_h5['relation_features']
+        self.val_rel_mask = self.sg_val_h5['relation_mask']
+        self.val_pair_idx = self.sg_val_h5['relation_pair_idx']
+        with open(os.path.join(data_folder, 'val_scene-graph_imgid2idx.pkl'), 'rb') as j:
+            self.sg_id = pickle.load(j)
+
+    def __getitem__(self, index):
+        # so the reader is the key to how we manage feature caption correspondence
+        # looks like we also need to access graph features via image id
+        image_id = self._image_features_reader.image_id[index]
+        image_features = self._image_features_reader[image_id]
+        sg_index = self.sg_id[image_id]
+
+        obj = torch.tensor(self.val_obj[sg_index], dtype=torch.float)
+        rel = torch.tensor(self.val_rel[sg_index], dtype=torch.float)
+        obj_mask = torch.tensor(self.val_obj_mask[sg_index], dtype=torch.bool)
+        rel_mask = torch.tensor(self.val_rel_mask[sg_index], dtype=torch.bool)
+        pair_idx = self.val_pair_idx[sg_index]
+
+        # Pad adaptive image features in the batch.
+        image_features = torch.from_numpy(_collate_image_features(image_features))
+
+        item = [image_features, obj, rel, obj_mask, rel_mask, pair_idx]
+        return item
+
+    def __len__(self) -> int:
+        # Number of training examples are number of captions, not number of images.
+        return len(self._captions_reader)
+
+
 def _collate_image_features(image):
     num_box = image.shape[0]
     image_feature_size = image.shape[-1]

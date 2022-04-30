@@ -230,12 +230,17 @@ if __name__ == '__main__':
     sgg_cfg_file = args.sgg_cfg_file
     sgg_weight_file = args.sgg_weight_file
     train_data_file = 'train_scene-graph.hdf5'
-    val_data_file = 'val_scene-graph.hdf5'
     train_indices_file = 'train_scene-graph_imgid2idx.pkl'
-    val_indices_file = 'val_scene-graph_imgid2idx.pkl'
     train_imgs_path = '/home/ubuntu/jeff/dataset/train2017/'
-    val_imgs_path = '/home/ubuntu/jeff/dataset/val2017/'
+
+    # val_indices_file = 'val_scene-graph_imgid2idx.pkl'
+    # val_data_file = 'val_scene-graph.hdf5'
+    # val_imgs_path = '/home/ubuntu/jeff/dataset/val2017/'
+
+    val_indices_file = '/home/ubuntu/jeff/val_scene-graph_imgid2idx.pkl'
+    val_data_file = '/home/ubuntu/jeff/val_scene-graph.hdf5'
+    val_imgs_path = '/home/ubuntu/jeff/dataset/nocaps/'
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
 
-    construct_sgg_hdf5(train_data_file, train_indices_file, train_imgs_path, buffer_size=args.buffersize)
-    # construct_sgg_hdf5(val_data_file, val_indices_file, val_imgs_path, buffer_size=args.buffersize)
+    # construct_sgg_hdf5(train_data_file, train_indices_file, train_imgs_path, buffer_size=args.buffersize)
+    construct_sgg_hdf5(val_data_file, val_indices_file, val_imgs_path, buffer_size=args.buffersize)

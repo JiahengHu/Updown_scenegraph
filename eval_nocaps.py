@@ -3,7 +3,7 @@ import json
 import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data
-from utils import collate_fn, create_captions_file, create_batched_graphs
+from utils import collate_fn, create_captions_file, create_batched_graphs, collate_test_dataset
 import torch.nn.functional as F
 from tqdm import tqdm
 import dgl
@@ -11,7 +11,7 @@ import argparse
 from pycocotools.coco import COCO
 from pycocoevalcap.eval import COCOEvalCap
 from allennlp.data import Vocabulary
-from datasets import TrainingDataset, ValidationDataset
+from datasets import TestDataset
 
 
 def beam_evaluate(data_name, checkpoint_file, data_folder, beam_size, outdir, graph_feature_dim=512, dataset='TEST'):
@@ -44,13 +44,10 @@ def beam_evaluate(data_name, checkpoint_file, data_folder, beam_size, outdir, gr
     pad_index = vocabulary.get_token_index("@@UNKNOWN@@")
 
     # DataLoader
-    # TODO: later test with nocaps, first use the validation dataset
-    val_image_features_h5path = "/home/ubuntu/jeff/dataset/coco_val2017_vg_detector_features_adaptive.h5"
-    val_captions_jsonpath = "data/coco/captions_val2017.json"
+    val_image_features_h5path = "/home/ubuntu/jeff/dataset/nocaps_test_vg_detector_features_adaptive.h5"
     loader = torch.utils.data.DataLoader(
-        ValidationDataset(args.data_folder, vocabulary,
-                          val_captions_jsonpath, val_image_features_h5path),
-        batch_size=1, shuffle=False, num_workers=1, collate_fn=collate_fn,
+        TestDataset(args.data_folder, val_image_features_h5path),
+        batch_size=1, shuffle=False, num_workers=1, collate_fn=collate_test_dataset,
         pin_memory=torch.cuda.is_available())
 
 
@@ -62,11 +59,9 @@ def beam_evaluate(data_name, checkpoint_file, data_folder, beam_size, outdir, gr
     hypotheses = list()
 
     # For each image
-    for caption_idx, (image_features, obj, rel, obj_mask, rel_mask, pair_ids, caps, caplens, orig_caps) in enumerate(
+    for caption_idx, (image_features, obj, rel, obj_mask, rel_mask, pair_ids) in enumerate(
             tqdm(loader, desc="EVALUATING AT BEAM SIZE " + str(beam_size))):
 
-        if caption_idx % 5 != 0:
-            continue
 
         k = beam_size
 
@@ -184,42 +179,31 @@ def beam_evaluate(data_name, checkpoint_file, data_folder, beam_size, outdir, gr
         i = complete_seqs_scores.index(max(complete_seqs_scores))
         seq = complete_seqs[i]
 
-        # References
-        # img_caps = [' '.join(c) for c in orig_caps]
-        img_caps = [c for c in orig_caps]
-        references.append(img_caps)
+        # TODO: add image id
+        # try to follow the format of nocap
+        
+        predictions.append(
+            {"image_id": image_id.item(), "caption": " ".join(caption)}
+        )
+
 
         # Hypotheses
         hypothesis = ([vocabulary.get_token_from_index(w) for w in seq if w not in {boundary_index, pad_index}])
         # hypothesis = ' '.join(hypothesis)
         hypotheses.append(hypothesis)
-        assert len(references) == len(hypotheses)
 
     # Calculate scores
     # metrics_dict = nlgeval.compute_metrics(references, hypotheses)
     hypotheses_file = os.path.join(outdir, 'hypotheses', '{}.{}.Hypotheses.json'.format(dataset,
                                                                                         data_name.split('_')[0]))
-    references_file = os.path.join(outdir, 'references', '{}.{}.References.json'.format(dataset,
-                                                                                        data_name.split('_')[0]))
     create_captions_file(range(len(hypotheses)), hypotheses, hypotheses_file)
-    create_captions_file(range(len(references)), references, references_file)
-    coco = COCO(references_file)
-    # add the predicted results to the object
-    coco_results = coco.loadRes(hypotheses_file)
-    # create the evaluation object with both the ground-truth and the predictions
-    coco_eval = COCOEvalCap(coco, coco_results)
-    # change to use the image ids in the results object, not those from the ground-truth
-    coco_eval.params['image_id'] = coco_results.getImgIds()
-    # run the evaluation
-    coco_eval.evaluate(verbose=False, metrics=['bleu', 'meteor', 'rouge', 'cider', 'spice'])
-    # Results contains: "Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4", "METEOR", "ROUGE_L", "CIDEr", "SPICE"
-    results = coco_eval.eval
+
     return results
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_folder', default='data', type=str,
+    parser.add_argument('--data_folder', default='/home/ubuntu/jeff/dataset', type=str,
                         help='folder with data files saved by create_input_files.py')
     parser.add_argument('--data_name', default='coco_5_cap_per_img_5_min_word_freq', type=str,
                         help='base name shared by data files')
