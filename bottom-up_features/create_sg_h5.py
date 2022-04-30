@@ -192,11 +192,6 @@ def construct_sgg_hdf5(hdf5_path, pickle_path, image_folder, buffer_size=1):
     for buffer in tqdm(collect_sgg_features(image_dataset, buffer_size=buffer_size), desc='collect sgg features',
                        total=int(np.ceil(len(image_dataset)/buffer_size))):
 
-        #just for debugging
-        id_ = buffer['ids'][0]
-        if id_ != 6547:
-            continue
-
         bs = buffer['object_features'].shape[0]
         object_features[i:i+bs] = buffer['object_features']
         object_features_mask[i:i+bs] = buffer['object_mask']
