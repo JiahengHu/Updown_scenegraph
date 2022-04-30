@@ -57,9 +57,11 @@ def beam_evaluate(data_name, checkpoint_file, data_folder, beam_size, outdir, gr
     # references = [[ref1a, ref1b, ref1c], [ref2a, ref2b], ...], hypotheses = [hyp1, hyp2, ...]
     references = list()
     hypotheses = list()
+    predictions = list()
+    img_ids = list()
 
     # For each image
-    for caption_idx, (image_features, obj, rel, obj_mask, rel_mask, pair_ids) in enumerate(
+    for caption_idx, (image_features, obj, rel, obj_mask, rel_mask, pair_ids, img_id) in enumerate(
             tqdm(loader, desc="EVALUATING AT BEAM SIZE " + str(beam_size))):
 
 
@@ -179,26 +181,20 @@ def beam_evaluate(data_name, checkpoint_file, data_folder, beam_size, outdir, gr
         i = complete_seqs_scores.index(max(complete_seqs_scores))
         seq = complete_seqs[i]
 
-        # TODO: add image id
-        # try to follow the format of nocap
-        
-        predictions.append(
-            {"image_id": image_id.item(), "caption": " ".join(caption)}
-        )
-
-
         # Hypotheses
         hypothesis = ([vocabulary.get_token_from_index(w) for w in seq if w not in {boundary_index, pad_index}])
+        predictions.append(hypothesis)
         # hypothesis = ' '.join(hypothesis)
-        hypotheses.append(hypothesis)
+        # predictions.append(
+        #     {"image_id": img_id, "caption": hypothesis}
+        # )
+        img_ids.append(img_id)
 
     # Calculate scores
     # metrics_dict = nlgeval.compute_metrics(references, hypotheses)
-    hypotheses_file = os.path.join(outdir, 'hypotheses', '{}.{}.Hypotheses.json'.format(dataset,
+    hypotheses_file = os.path.join(outdir, 'nocaps_hypotheses', '{}.{}.Hypotheses.json'.format(dataset,
                                                                                         data_name.split('_')[0]))
-    create_captions_file(range(len(hypotheses)), hypotheses, hypotheses_file)
-
-    return results
+    create_captions_file(img_ids, predictions, hypotheses_file)
 
 
 if __name__ == '__main__':
@@ -220,6 +216,5 @@ if __name__ == '__main__':
     args = parser.parse_args()
     cudnn.benchmark = True  # True only if inputs to model are fixed size, otherwise lot of computational overhead
 
-    metrics_dict = beam_evaluate(args.data_name, args.checkpoint_file, args.data_folder, args.beam_size, args.outdir,
+    beam_evaluate(args.data_name, args.checkpoint_file, args.data_folder, args.beam_size, args.outdir,
                                  graph_feature_dim=args.graph_feature_dim, dataset=args.dataset)
-    print(metrics_dict)

@@ -254,7 +254,7 @@ class TestDataset(Dataset):
         # Pad adaptive image features in the batch.
         image_features = torch.from_numpy(_collate_image_features(image_features))
 
-        item = [image_features, obj, rel, obj_mask, rel_mask, pair_idx]
+        item = [image_features, obj, rel, obj_mask, rel_mask, pair_idx, image_id]
         return item
 
     def __len__(self) -> int:

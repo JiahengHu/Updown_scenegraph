@@ -9,7 +9,7 @@ import pickle
 import dgl
 
 
-def collate_fn(batch):
+def collate_test_dataset(batch):
     """ Collate function to be used when iterating captioning datasets.
         Only use with batch size == 1.
     """
@@ -17,12 +17,12 @@ def collate_fn(batch):
         image_features, caps, caplens, orig_caps = zip(*batch)
         r = (torch.stack(image_features), torch.stack(caps), torch.stack(caplens), orig_caps[0])
     else:
-        (img, obj, rel, obj_mask, rel_mask, pair_idx) = zip(*batch)
+        (img, obj, rel, obj_mask, rel_mask, pair_idx, image_id) = zip(*batch)
         r = (torch.stack(img), torch.stack(obj), torch.stack(rel), torch.stack(obj_mask), torch.stack(rel_mask),
-             torch.stack([torch.as_tensor(p) for p in pair_idx]))
+             torch.stack([torch.as_tensor(p) for p in pair_idx]), image_id)
     return r
 
-def collate_test_dataset(batch):
+def collate_fn(batch):
     """ Collate function to be used when iterating captioning datasets.
         Only use with batch size == 1.
     """
